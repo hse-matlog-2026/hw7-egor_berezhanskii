@@ -114,6 +114,12 @@ class Term:
             The standard string representation of the current term.
         """
         # Task 7.1
+        if is_variable(self.root) or is_constant(self.root):
+            return self.root
+
+        args_str = ",".join([argument.__repr__() for argument in self.arguments])
+
+        return self.root + "("+ args_str + ")"
 
     def __eq__(self, other: object) -> bool:
         """Compares the current term with the given one.
@@ -157,6 +163,87 @@ class Term:
             that entire name (and not just a part of it, such as ``'x1'``).
         """
         # Task 7.3a
+        def h1(s):
+            if not s:
+                return "", ""
+
+            pairs = {')': '(', ']': '['}
+            openers = set(pairs.values())
+            stack = []
+
+            for i, char in enumerate(s):
+                if char in openers:
+                    stack.append(char)
+                elif char in pairs:
+                    if not stack or stack.pop() != pairs[char]:
+                        return s, ""
+                    if not stack:
+                        return s[:i + 1], s[i + 1:]
+
+            return s, ""
+
+        import re
+        TOKEN_PATTERN = re.compile(r'^[a-zA-Z0-9]+')
+
+        def h2(string):
+            if not string:
+                return "", ""
+
+            first_char = string[0]
+
+            if first_char == '_':
+                return '_', string[1:]
+
+            match = TOKEN_PATTERN.match(string)
+
+            if not match:
+                return "", string
+
+            token = match.group(0)
+            rest = string[match.end():]
+
+            if is_constant(first_char) or is_variable(first_char):
+                return token, rest
+
+            elif is_function(first_char):
+                args_part, suffix = h1(rest)
+                return token + args_part, suffix
+
+            return token, rest
+
+        ALNUM_PATTERN = re.compile(r'^[a-zA-Z0-9]+')
+
+        def h3(string):
+            if not string:
+                return "", "", ""
+
+            match = ALNUM_PATTERN.match(string)
+
+            if not match:
+                return "", "", string
+
+            token = match.group(0)
+            rest = string[match.end():]
+
+            return (token, *h1(rest)) if rest else (token, "", "")
+
+        if is_constant(string[0]) or is_variable(string[0]):
+            p, suf = h2(string)
+
+            return Term(p), suf
+
+        func, args, suf = h3(string)
+        args_suf = args[1:-1]
+        prefixes = []
+
+        while args_suf:
+            arg_prefix, args_suf = h2(args_suf)
+            prefixes.append(Term._parse_prefix(arg_prefix)[0])
+            if len(args_suf) != 0 and args_suf[0] == ',': args_suf = args_suf[1:]
+
+        return Term(func, prefixes), suf
+
+
 
     @staticmethod
     def parse(string: str) -> Term:
@@ -169,6 +256,7 @@ class Term:
             A term whose standard string representation is the given string.
         """
         # Task 7.3b
+        return Term._parse_prefix(string)[0]
 
     def constants(self) -> Set[str]:
         """Finds all constant names in the current term.
@@ -381,6 +469,20 @@ class Formula:
             The standard string representation of the current formula.
         """
         # Task 7.2
+        if is_unary(self.root):
+            return self.root + self.first.__repr__()
+        elif is_binary(self.root):
+            return "(" + self.first.__repr__() + self.root + self.second.__repr__() + ")"
+
+        elif is_relation(self.root):
+            args_str = ",".join([argument.__repr__() for argument in self.arguments])
+
+            return self.root + "(" + args_str + ")"
+
+        elif is_equality(self.root):
+            return self.arguments[0].__repr__() + self.root + self.arguments[1].__repr__()
+
+        return self.root + self.variable + "[" + self.statement.__repr__() + "]"
 
     def __eq__(self, other: object) -> bool:
         """Compares the current formula with the given one.

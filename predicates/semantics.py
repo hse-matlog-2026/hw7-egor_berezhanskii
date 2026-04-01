@@ -12,6 +12,9 @@ from logic_utils import frozen, frozendict
 
 from predicates.syntax import *
 
+from functools import lru_cache
+from typing import Dict, Any, Tuple
+
 #: A generic type for a universe element in a model.
 T = TypeVar('T')
 
@@ -147,6 +150,71 @@ class Model(Generic[T]):
             assert function in self.function_interpretations and \
                    self.function_arities[function] == arity
         # Task 7.7
+        if is_variable(term.root):
+            return assignment[term.root]
+
+        if is_constant(term.root):
+            return self.constant_interpretations[term.root]
+
+        if is_function(term.root):
+            arguments = []
+            for arg in term.arguments:
+                arguments.append(self.evaluate_term(arg, assignment))
+
+            return self.function_interpretations[term.root][tuple(arguments)]
+
+    def _evaluate_binary(self, formula: Formula, assignment: Dict[str, Any], operator: str) -> bool:
+        first = self.evaluate_formula(formula.first, assignment)
+        second = self.evaluate_formula(formula.second, assignment)
+
+        operators = {
+            '&': lambda: first and second,
+            '|': lambda: first or second,
+            '->': lambda: (not first) or second,
+            '-&': lambda: not (first and second),
+            '-|': lambda: not (first or second),
+            '+': lambda: first != second,
+            '<->': lambda: first == second,
+        }
+
+        return operators[operator]()
+
+    def _evaluate_quantifier(self, formula: Formula, assignment: Dict[str, Any]) -> bool:
+        variable = formula.variable
+        universe = self.universe
+
+        if formula.root == 'A':
+            return all(
+                self.evaluate_formula(formula.statement, {**assignment, variable: value})
+                for value in universe
+            )
+        else:
+            return any(
+                self.evaluate_formula(formula.statement, {**assignment, variable: value})
+                for value in universe
+            )
+
+    @lru_cache(maxsize=1000)
+    def _evaluate_formula_cached(self, formula: Formula, assignment_tuple: Tuple) -> bool:
+        assignment = dict(assignment_tuple)
+        root = formula.root
+
+        if is_equality(root):
+            return (self.evaluate_term(formula.arguments[0], assignment) ==
+                    self.evaluate_term(formula.arguments[1], assignment))
+
+        if is_relation(root):
+            args = tuple(self.evaluate_term(arg, assignment) for arg in formula.arguments)
+            return args in self.relation_interpretations[root]
+
+        if is_unary(root):
+            return not self.evaluate_formula(formula.first, assignment)
+
+        if is_binary(root):
+            return self._evaluate_binary(formula, assignment, root)
+
+        if is_quantifier(root):
+            return self._evaluate_quantifier(formula, assignment)
 
     def evaluate_formula(self, formula: Formula,
                          assignment: Mapping[str, T] = frozendict()) -> bool:
@@ -176,6 +244,7 @@ class Model(Generic[T]):
             assert relation in self.relation_interpretations and \
                    self.relation_arities[relation] in {-1, arity}
         # Task 7.8
+        return self._evaluate_formula_cached(formula, tuple(sorted(assignment.items())))
 
     def is_model_of(self, formulas: AbstractSet[Formula]) -> bool:
         """Checks if the current model is a model of the given formulas.
@@ -200,3 +269,16 @@ class Model(Generic[T]):
                 assert relation in self.relation_interpretations and \
                        self.relation_arities[relation] in {-1, arity}
         # Task 7.9
+        from functools import reduce
+
+        def close_formula(formula: Formula) -> Formula:
+            return reduce(
+                lambda f, v: Formula('A', v, f),
+                sorted(formula.free_variables()),
+                formula
+            )
+
+        return all(
+            self.evaluate_formula(close_formula(f), {})
+            for f in formulas
+        )

@@ -265,6 +265,17 @@ class Term:
             A set of all constant names used in the current term.
         """
         # Task 7.5a
+        if is_constant(self.root):
+            return {self.root}
+
+        if is_variable(self.root):
+            return set()
+
+        constants = set()
+        for argument in self.arguments:
+            constants.update(argument.constants())
+
+        return constants
 
     def variables(self) -> Set[str]:
         """Finds all variable names in the current term.
@@ -273,6 +284,17 @@ class Term:
             A set of all variable names used in the current term.
         """
         # Task 7.5b
+        if is_variable(self.root):
+            return {self.root}
+
+        if is_constant(self.root):
+            return set()
+
+        variables = set()
+        for argument in self.arguments:
+            variables.update(argument.variables())
+
+        return variables
 
     def functions(self) -> Set[Tuple[str, int]]:
         """Finds all function names in the current term, along with their
@@ -283,6 +305,12 @@ class Term:
             all function names used in the current term.
         """
         # Task 7.5c
+        if not is_function(self.root):
+            return set()
+
+        return {(self.root, len(self.arguments))}.union(
+            *(arg.functions() for arg in self.arguments)
+        )
 
     def substitute(self, substitution_map: Mapping[str, Term],
                    forbidden_variables: AbstractSet[str] = frozenset()) -> Term:
@@ -527,6 +555,261 @@ class Formula:
             that entire name (and not just a part of it, such as ``'f(y)=x1'``).
         """
         # Task 7.4a
+        if is_constant(string[0]) or is_variable(string[0]) or is_function(string[0]):
+            return Formula._parse_equality(string)
+
+        elif is_relation(string[0]):
+            return Formula._parse_relation(string)
+
+        elif is_unary(string[0]):
+            return Formula._parse_unary(string)
+
+        elif is_quantifier(string[0]):
+            return Formula._parse_quantifier(string)
+
+        elif string[0] == '(':
+            return Formula._parse_binary(string)
+
+    @staticmethod
+    def _parse_equality(string: str) -> Tuple['Formula', str]:
+        def h1(s):
+            if not s:
+                return "", ""
+
+            pairs = {')': '(', ']': '['}
+            openers = set(pairs.values())
+            stack = []
+
+            for i, char in enumerate(s):
+                if char in openers:
+                    stack.append(char)
+                elif char in pairs:
+                    if not stack or stack.pop() != pairs[char]:
+                        return s, ""
+                    if not stack:
+                        return s[:i + 1], s[i + 1:]
+
+            return s, ""
+
+        import re
+        TOKEN_PATTERN = re.compile(r'^[a-zA-Z0-9]+')
+
+        def h2(string):
+            if not string:
+                return "", ""
+
+            first_char = string[0]
+
+            if first_char == '_':
+                return '_', string[1:]
+
+            match = TOKEN_PATTERN.match(string)
+
+            if not match:
+                return "", string
+
+            token = match.group(0)
+            rest = string[match.end():]
+
+            if is_constant(first_char) or is_variable(first_char):
+                return token, rest
+
+            elif is_function(first_char):
+                args_part, suffix = h1(rest)
+                return token + args_part, suffix
+
+            return token, rest
+
+        first_term, suffix = h2(string)
+
+        second_term, suffix = h2(suffix[1:])
+
+        return Formula('=', [Term.parse(first_term), Term.parse(second_term)]), suffix
+
+    @staticmethod
+    def _parse_relation(string: str) -> Tuple['Formula', str]:
+        def h1(s):
+            if not s:
+                return "", ""
+
+            pairs = {')': '(', ']': '['}
+            openers = set(pairs.values())
+            stack = []
+
+            for i, char in enumerate(s):
+                if char in openers:
+                    stack.append(char)
+                elif char in pairs:
+                    if not stack or stack.pop() != pairs[char]:
+                        return s, ""
+                    if not stack:
+                        return s[:i + 1], s[i + 1:]
+
+            return s, ""
+
+        import re
+        TOKEN_PATTERN = re.compile(r'^[a-zA-Z0-9]+')
+
+        def h2(string):
+            if not string:
+                return "", ""
+
+            first_char = string[0]
+
+            if first_char == '_':
+                return '_', string[1:]
+
+            match = TOKEN_PATTERN.match(string)
+
+            if not match:
+                return "", string
+
+            token = match.group(0)
+            rest = string[match.end():]
+
+            if is_constant(first_char) or is_variable(first_char):
+                return token, rest
+
+            elif is_function(first_char):
+                args_part, suffix = h1(rest)
+                return token + args_part, suffix
+
+            return token, rest
+
+        ALNUM_PATTERN = re.compile(r'^[a-zA-Z0-9]+')
+
+        def h3(string):
+            if not string:
+                return "", "", ""
+
+            match = ALNUM_PATTERN.match(string)
+
+            if not match:
+                return "", "", string
+
+            token = match.group(0)
+            rest = string[match.end():]
+
+            return (token, *h1(rest)) if rest else (token, "", "")
+
+        relation_name, args_str, suffix = h3(string)
+
+        if args_str.startswith('(') and args_str.endswith(')'):
+            content = args_str[1:-1]
+        else:
+            content = args_str
+
+        arg_terms = []
+        while content:
+            arg_term, content = h2(content)
+            arg_terms.append(Term._parse_prefix(arg_term)[0])
+
+            if content.startswith(','):
+                content = content[1:]
+
+        return Formula(relation_name, arg_terms), suffix
+
+    @staticmethod
+    def _parse_unary(string: str) -> Tuple['Formula', str]:
+        prefix, suffix = Formula._parse_prefix(string[1:])
+
+        return Formula('~', prefix), suffix
+
+    @staticmethod
+    def _parse_quantifier(string: str) -> Tuple['Formula', str]:
+        def h1(s):
+            if not s:
+                return "", ""
+
+            pairs = {')': '(', ']': '['}
+            openers = set(pairs.values())
+            stack = []
+
+            for i, char in enumerate(s):
+                if char in openers:
+                    stack.append(char)
+                elif char in pairs:
+                    if not stack or stack.pop() != pairs[char]:
+                        return s, ""
+                    if not stack:
+                        return s[:i + 1], s[i + 1:]
+
+            return s, ""
+
+        import re
+        TOKEN_PATTERN = re.compile(r'^[a-zA-Z0-9]+')
+
+        def h2(string):
+            if not string:
+                return "", ""
+
+            first_char = string[0]
+
+            if first_char == '_':
+                return '_', string[1:]
+
+            match = TOKEN_PATTERN.match(string)
+
+            if not match:
+                return "", string
+
+            token = match.group(0)
+            rest = string[match.end():]
+
+            if is_constant(first_char) or is_variable(first_char):
+                return token, rest
+
+            elif is_function(first_char):
+                args_part, suffix = h1(rest)
+                return token + args_part, suffix
+
+            return token, rest
+
+        quantifier = string[0]
+        variable, suffix = h2(string[1:])
+
+        bracketed_statement, suffix = h1(suffix)
+
+        inner_formula, _ = Formula._parse_prefix(bracketed_statement[1:-1])
+
+        return Formula(quantifier, variable, inner_formula), suffix
+
+    @staticmethod
+    def _parse_binary(string: str) -> Tuple['Formula', str]:
+        def h1(s):
+            if not s:
+                return "", ""
+
+            pairs = {')': '(', ']': '['}
+            openers = set(pairs.values())
+            stack = []
+
+            for i, char in enumerate(s):
+                if char in openers:
+                    stack.append(char)
+                elif char in pairs:
+                    if not stack or stack.pop() != pairs[char]:
+                        return s, ""
+                    if not stack:
+                        return s[:i + 1], s[i + 1:]
+
+            return s, ""
+
+        def h4(s):
+            if s[0] in {'&', '|', '+'}:
+                return s[0], s[1:]
+            elif s[0] == '-':
+                return s[0:2], s[2:]
+
+            return s[0:3], s[3:]
+
+        bracketed_formula, suffix = h1(string)
+        inner_content = bracketed_formula[1:]
+        first, remaining = Formula._parse_prefix(inner_content)
+        operator, second_str = h4(remaining)
+        second, _ = Formula._parse_prefix(second_str)
+
+        return Formula(operator, first, second), suffix
 
     @staticmethod
     def parse(string: str) -> Formula:
@@ -539,6 +822,7 @@ class Formula:
             A formula whose standard string representation is the given string.
         """
         # Task 7.4b
+        return Formula._parse_prefix(string)[0]
 
     def constants(self) -> Set[str]:
         """Finds all constant names in the current formula.
@@ -547,6 +831,16 @@ class Formula:
             A set of all constant names used in the current formula.
         """
         # Task 7.6a
+        if is_quantifier(self.root):
+            return self.statement.constants()
+        if is_unary(self.root):
+            return self.first.constants()
+        if is_binary(self.root):
+            return self.first.constants() | self.second.constants()
+        if is_equality(self.root) or is_relation(self.root):
+            return set().union(*(arg.constants() for arg in self.arguments))
+
+        return set()
 
     def variables(self) -> Set[str]:
         """Finds all variable names in the current formula.
@@ -555,6 +849,16 @@ class Formula:
             A set of all variable names used in the current formula.
         """
         # Task 7.6b
+        if is_quantifier(self.root):
+            return self.statement.variables() | {self.variable}
+        if is_unary(self.root):
+            return self.first.variables()
+        if is_binary(self.root):
+            return self.first.variables() | self.second.variables()
+        if is_equality(self.root) or is_relation(self.root):
+            return set().union(*(arg.variables() for arg in self.arguments))
+
+        return set()
 
     def free_variables(self) -> Set[str]:
         """Finds all variable names that are free in the current formula.
@@ -564,6 +868,16 @@ class Formula:
             only within a scope of a quantification on that variable name.
         """
         # Task 7.6c
+        if is_quantifier(self.root):
+            return self.statement.free_variables() - {self.variable}
+        if is_unary(self.root):
+            return self.first.free_variables()
+        if is_binary(self.root):
+            return self.first.free_variables() | self.second.free_variables()
+        if is_equality(self.root) or is_relation(self.root):
+            return set().union(*(arg.variables() for arg in self.arguments))
+
+        return set()
 
     def functions(self) -> Set[Tuple[str, int]]:
         """Finds all function names in the current formula, along with their
@@ -574,6 +888,16 @@ class Formula:
             all function names used in the current formula.
         """
         # Task 7.6d
+        if is_quantifier(self.root):
+            return self.statement.functions()
+        if is_unary(self.root):
+            return self.first.functions()
+        if is_binary(self.root):
+            return self.first.functions() | self.second.functions()
+        if is_equality(self.root) or is_relation(self.root):
+            return set().union(*(arg.functions() for arg in self.arguments))
+
+        return set()
 
     def relations(self) -> Set[Tuple[str, int]]:
         """Finds all relation names in the current formula, along with their
@@ -584,6 +908,16 @@ class Formula:
             all relation names used in the current formula.
         """
         # Task 7.6e
+        if is_relation(self.root):
+            return {(self.root, len(self.arguments))}
+        if is_quantifier(self.root):
+            return self.statement.relations()
+        if is_unary(self.root):
+            return self.first.relations()
+        if is_binary(self.root):
+            return self.first.relations() | self.second.relations()
+
+        return set()
 
     def substitute(self, substitution_map: Mapping[str, Term],
                    forbidden_variables: AbstractSet[str] = frozenset()) -> \
